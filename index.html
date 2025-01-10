@@ -1,3 +1,5 @@
+<!-- File: /home/brandon/Projects/prompter/index.html -->
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -16,19 +18,60 @@
             font-family: Arial, sans-serif;
             padding: 20px;
             display: flex;
-            justify-content: center; /* Center the chat container */
+            height: 100vh;
+            overflow: hidden; /* Prevent body from scrolling */
+        }
+
+        /* Sidebar Styling */
+        .sidebar {
+            width: 250px;
+            background-color: #3a3f4b;
+            border-radius: 10px;
+            padding: 20px;
+            margin-right: 20px;
+            overflow-y: auto;
+        }
+
+        .sidebar h4 {
+            color: #50fa7b;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .history-item {
+            background-color: #44475a;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .history-item:hover {
+            background-color: #50fa7b;
+            color: #282a36;
+        }
+
+        .history-title {
+            font-weight: bold;
+        }
+
+        .history-date {
+            font-size: 0.8rem;
+            color: #6272a4;
         }
 
         /* Chat Container Styling */
         .chat-container {
-            max-width: 800px; /* Set a maximum width */
-            width: 100%; /* Allow it to take up full width up to max-width */
-            margin: 20px auto; /* Center the container */
+            flex: 1;
             background-color: #3a3f4b; /* Container Background */
             border-radius: 10px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
             padding: 20px; /* Added padding */
             position: relative; /* For positioning the new message indicator */
+            display: flex;
+            flex-direction: column;
+            height: 100%;
             overflow: hidden; /* Hide any overflowing content */
         }
 
@@ -42,12 +85,11 @@
 
         /* Messages Area */
         #messages {
-            max-height: 500px;
+            flex: 1;
             overflow-y: auto;
             padding-right: 10px;
             margin-bottom: 20px;
             position: relative; /* For positioning the new message indicator */
-            /* Removed white-space: nowrap to allow messages to wrap */
         }
 
         /* Scroll Indicator Styling */
@@ -214,20 +256,46 @@
             border-radius: 4px;
         }
 
+        .sidebar::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .sidebar::-webkit-scrollbar-track {
+            background: #3a3f4b;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb {
+            background-color: #6272a4;
+            border-radius: 4px;
+        }
+
         /* Responsive Adjustments */
-        @media (max-width: 576px) {
-            .chat-container {
-                margin: 20px;
-                padding: 15px;
+        @media (max-width: 992px) {
+            body {
+                flex-direction: column;
             }
 
-            #sendButton, #loadCodebaseButton {
-                padding: 10px;
+            .sidebar {
+                width: 100%;
+                margin-right: 0;
+                margin-bottom: 20px;
+                height: 200px;
+            }
+
+            .chat-container {
+                height: calc(100vh - 240px); /* Adjust based on sidebar height */
             }
         }
     </style>
 </head>
 <body>
+
+    <div class="sidebar">
+        <h4>Chat History</h4>
+        <div id="historyList">
+            <!-- History items will be appended here -->
+        </div>
+    </div>
 
     <div class="chat-container">
         <h3>OpenAI Chat</h3>
@@ -267,6 +335,7 @@
     <script>
         let apiKey = '';
         let model = 'gpt-3.5-turbo'; // Default model
+        let currentChatId = null; // To track the current chat
 
         // Initialize conversation history
         const conversation = [];
@@ -412,6 +481,83 @@
             });
         }
 
+        // Function to fetch and display chat histories
+        async function loadChatHistories() {
+            try {
+                const response = await fetch('http://localhost:5000/history');
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to fetch chat histories.');
+                }
+
+                const histories = data.histories;
+                const historyList = document.getElementById('historyList');
+                historyList.innerHTML = ''; // Clear existing
+
+                histories.forEach(history => {
+                    const historyItem = document.createElement('div');
+                    historyItem.classList.add('history-item');
+                    historyItem.dataset.chatId = history.id;
+
+                    const title = document.createElement('div');
+                    title.classList.add('history-title');
+                    title.textContent = history.title || 'Untitled Chat';
+
+                    const date = document.createElement('div');
+                    date.classList.add('history-date');
+                    const localDate = new Date(history.created_at).toLocaleString();
+                    date.textContent = localDate;
+
+                    historyItem.appendChild(title);
+                    historyItem.appendChild(date);
+
+                    historyItem.addEventListener('click', () => {
+                        loadSpecificChat(history.id);
+                    });
+
+                    historyList.appendChild(historyItem);
+                });
+
+            } catch (error) {
+                alert('Error loading chat histories: ' + error.message);
+                console.error(error);
+            }
+        }
+
+        // Function to load a specific chat history
+        async function loadSpecificChat(chatId) {
+            try {
+                const response = await fetch(`http://localhost:5000/history/${chatId}`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to fetch chat history.');
+                }
+
+                const { chat, messages } = data;
+
+                // Set currentChatId
+                currentChatId = chat.id;
+
+                // Clear current messages
+                const messagesDiv = document.getElementById('messages');
+                messagesDiv.innerHTML = '<div id="newMessageIndicator">New messages</div>';
+
+                // Append messages
+                messages.forEach(msg => {
+                    appendMessage(msg.sender, msg.content);
+                });
+
+                // Scroll to bottom
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+            } catch (error) {
+                alert('Error loading chat history: ' + error.message);
+                console.error(error);
+            }
+        }
+
         // Modify the sendMessage function to handle streaming bot responses with copy buttons
         async function sendMessage() {
             const userInput = document.getElementById('userInput').value.trim();
@@ -428,7 +574,8 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        message: userInput
+                        message: userInput,
+                        chat_id: currentChatId // Send currentChatId to associate the message
                     })
                 });
 
@@ -439,24 +586,35 @@
 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
-                let done = false;
+                let doneReading = false;
                 let botMessage = '';
 
                 const messagesDiv = document.getElementById('messages');
 
-                // Create a new message bubble for the bot
-                const messageDiv = document.createElement('div');
-                messageDiv.classList.add('message', 'bot');
-                const textDiv = document.createElement('div');
-                textDiv.classList.add('message-text');
-                // Initialize innerHTML with empty content
-                textDiv.innerHTML = '';
-                messageDiv.appendChild(textDiv);
-                messagesDiv.appendChild(messageDiv);
+                // Create a new message bubble for the bot if not loading an existing chat
+                if (!currentChatId) {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.classList.add('message', 'bot');
+                    const textDiv = document.createElement('div');
+                    textDiv.classList.add('message-text');
+                    // Initialize innerHTML with empty content
+                    textDiv.innerHTML = '';
+                    messageDiv.appendChild(textDiv);
+                    messagesDiv.appendChild(messageDiv);
+                }
 
-                while (!done) {
-                    const { value, done: doneReading } = await reader.read();
-                    done = doneReading;
+                // Select the last bot message
+                const lastBotMessage = messagesDiv.querySelectorAll('.message.bot').length > 0 ?
+                    messagesDiv.querySelectorAll('.message.bot')[messagesDiv.querySelectorAll('.message.bot').length - 1] :
+                    null;
+
+                if (lastBotMessage) {
+                    var textDiv = lastBotMessage.querySelector('.message-text');
+                }
+
+                while (!doneReading) {
+                    const { value, done } = await reader.read();
+                    doneReading = done;
                     if (value) {
                         const chunk = decoder.decode(value, { stream: true });
                         botMessage += chunk;
@@ -504,29 +662,6 @@
                         }
                     }
                 }
-
-                // After the stream is done, ensure all code blocks have copy buttons
-                textDiv.querySelectorAll('pre').forEach((pre) => {
-                    if (!pre.parentElement.classList.contains('code-block-container')) {
-                        const container = document.createElement('div');
-                        container.classList.add('code-block-container');
-                        pre.parentNode.insertBefore(container, pre);
-                        container.appendChild(pre);
-
-                        // Create the copy button
-                        const button = document.createElement('button');
-                        button.classList.add('copy-button');
-                        button.innerText = 'Copy';
-
-                        // Append the button to the container
-                        container.appendChild(button);
-
-                        // Add click event listener to the button
-                        button.addEventListener('click', () => {
-                            copyCodeToClipboard(pre.querySelector('code'));
-                        });
-                    }
-                });
 
             } catch (error) {
                 appendMessage('bot', 'Error: ' + error.message);
@@ -594,8 +729,14 @@
             }
         }
 
-        // Load config on page load
-        window.onload = loadConfig;
+        // Function to initialize and load chat histories on page load
+        async function initializeChat() {
+            await loadConfig();
+            await loadChatHistories();
+        }
+
+        // Load config on page load and initialize histories
+        window.onload = initializeChat;
     </script>
 
 </body>
