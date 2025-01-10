@@ -15,16 +15,21 @@
             color: #f8f8f2; /* Light Text */
             font-family: Arial, sans-serif;
             padding: 20px;
+            display: flex;
+            justify-content: center; /* Center the chat container */
         }
 
         /* Chat Container Styling */
         .chat-container {
-            max-width: 800px;
-            margin: 0 auto;
+            max-width: 800px; /* Set a maximum width */
+            width: 100%; /* Allow it to take up full width up to max-width */
+            margin: 20px auto; /* Center the container */
             background-color: #3a3f4b; /* Container Background */
             border-radius: 10px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-            padding: 20px;
+            padding: 20px; /* Added padding */
+            position: relative; /* For positioning the new message indicator */
+            overflow: hidden; /* Hide any overflowing content */
         }
 
         /* Header */
@@ -41,6 +46,23 @@
             overflow-y: auto;
             padding-right: 10px;
             margin-bottom: 20px;
+            position: relative; /* For positioning the new message indicator */
+            /* Removed white-space: nowrap to allow messages to wrap */
+        }
+
+        /* Scroll Indicator Styling */
+        #newMessageIndicator {
+            position: absolute;
+            bottom: 70px; /* Positioned above the input area */
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #50fa7b;
+            color: #282a36;
+            padding: 5px 10px;
+            border-radius: 15px;
+            cursor: pointer;
+            display: none; /* Hidden by default */
+            z-index: 10;
         }
 
         /* Message Styling */
@@ -60,10 +82,12 @@
         .message-text {
             padding: 10px 15px;
             border-radius: 15px;
-            max-width: 75%;
+            max-width: 100%;
             word-wrap: break-word;
             font-size: 1rem;
             line-height: 1.5;
+            position: relative; /* For positioning child elements like the copy button */
+            display: inline-block;
         }
 
         /* User Message Bubble */
@@ -105,6 +129,7 @@
             border-radius: 5px;
             overflow-x: auto;
             margin: 10px 0; /* Add some margin for spacing */
+            white-space: pre; /* Prevent wrapping */
         }
 
         .message.bot .message-text code {
@@ -112,6 +137,33 @@
             color: inherit; /* Let Highlight.js handle color */
             padding: 0;
             border-radius: 4px;
+        }
+
+        /* Copy Button Styling */
+        .copy-button {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background-color: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: #f8f8f2;
+            padding: 5px 10px;
+            font-size: 0.9rem;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .copy-button:hover {
+            background-color: #50fa7b;
+            color: #282a36;
+        }
+
+        /* Necessary for positioning the copy button relative to the code block */
+        .code-block-container {
+            position: relative;
+            display: inline-block;
+            max-width: 100%;
         }
 
         /* Input and Button Styling */
@@ -141,6 +193,7 @@
             padding: 0 20px;
             cursor: pointer;
             transition: background-color 0.3s ease;
+            white-space: nowrap;
         }
 
         #sendButton:hover, #loadCodebaseButton:hover {
@@ -180,6 +233,8 @@
         <h3>OpenAI Chat</h3>
         <div id="messages" class="mb-3">
             <!-- Messages will appear here -->
+            <!-- New Message Indicator -->
+            <div id="newMessageIndicator">New messages</div>
         </div>
         <div class="input-group mb-2">
             <input type="text" id="userInput" class="form-control" placeholder="Type your message...">
@@ -201,7 +256,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/typescript.min.js"></script>
     <script>
         hljs.configure({
-            languages: ['python', 'bash', 'bash', 'xml', 'css', 'javascript', 'java', 'kotlin', 'typescript']
+            languages: ['python', 'bash', 'xml', 'css', 'javascript', 'java', 'kotlin', 'typescript']
         });
         // Do not call highlightAll() here to avoid premature highlighting
     </script>
@@ -212,13 +267,13 @@
     <script>
         let apiKey = '';
         let model = 'gpt-3.5-turbo'; // Default model
-    
+
         // Initialize conversation history
         const conversation = [];
-    
+
         // Variable to store the codebase content
         let codebaseContent = '';
-    
+
         // Function to load configuration from config.conf
         async function loadConfig() {
             try {
@@ -238,7 +293,7 @@
                 console.error(error);
             }
         }
-    
+
         // Simple parser for key=value pairs
         function parseConfig(text) {
             const lines = text.split('\n');
@@ -251,7 +306,7 @@
             });
             return config;
         }
-    
+
         // Configure Marked.js to use Highlight.js for syntax highlighting
         marked.setOptions({
             highlight: function(code, language) {
@@ -269,17 +324,17 @@
             breaks: true, // Convert '\n' in paragraphs into <br>
             gfm: true // GitHub Flavored Markdown
         });
-    
+
         // Function to append a message to the chat
         function appendMessage(sender, text) {
             const messagesDiv = document.getElementById('messages');
-    
+
             const messageDiv = document.createElement('div');
             messageDiv.classList.add('message', sender);
-    
+
             const textDiv = document.createElement('div');
             textDiv.classList.add('message-text');
-    
+
             if (sender === 'bot') {
                 // Parse Markdown and set as HTML with syntax highlighting
                 textDiv.innerHTML = marked.parse(text);
@@ -287,49 +342,85 @@
                 textDiv.querySelectorAll('pre code').forEach((block) => {
                     hljs.highlightElement(block);
                 });
+
+                // Wrap the code blocks in a container to position the copy button
+                textDiv.querySelectorAll('pre').forEach((pre) => {
+                    const container = document.createElement('div');
+                    container.classList.add('code-block-container');
+                    pre.parentNode.insertBefore(container, pre);
+                    container.appendChild(pre);
+
+                    // Create the copy button
+                    const button = document.createElement('button');
+                    button.classList.add('copy-button');
+                    button.innerText = 'Copy';
+
+                    // Append the button to the container
+                    container.appendChild(button);
+
+                    // Add click event listener to the button
+                    button.addEventListener('click', () => {
+                        copyCodeToClipboard(pre.querySelector('code'));
+                    });
+                });
             } else {
                 // For user messages, display as plain text
                 textDiv.textContent = text;
             }
-    
+
             messageDiv.appendChild(textDiv);
             messagesDiv.appendChild(messageDiv);
-    
-            // Scroll to the bottom
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        }
-    
-        // Function to load the codebase by calling the backend endpoint
-        async function loadCodebase() {
-            try {
-                const response = await fetch('http://localhost:5000/run_codecollector', {
-                    method: 'POST'
-                });
-    
-                const data = await response.json();
-    
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to load codebase.');
+
+            adjustChatWidth();
+
+            // Scroll to the bottom only if the user is already near the bottom
+            const threshold = 100; // px from the bottom
+            const isAtBottom = messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight < threshold;
+            if (isAtBottom) {
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            } else {
+                // Show new message indicator if not at bottom and sender is bot
+                if (sender === 'bot') {
+                    showNewMessageIndicator();
                 }
-    
-                // Inform the user that the codebase has been loaded
-                appendMessage('bot', 'Codebase loaded successfully. You can now ask questions related to your codebase.');
-    
-            } catch (error) {
-                appendMessage('bot', `Error loading codebase: ${error.message}`);
-                console.error(error);
             }
         }
-    
-        // Function to send user message to OpenAI API with streaming
+
+        // Function to adjust the chat container's width based on the widest message
+        function adjustChatWidth() {
+            // Removed dynamic width adjustment to maintain consistent container size
+            // Ensure the chat container does not exceed the maximum width
+            const chatContainer = document.querySelector('.chat-container');
+            chatContainer.style.width = '100%'; // Ensure it uses the CSS-defined width
+        }
+
+        // Function to copy code to clipboard
+        function copyCodeToClipboard(codeElement) {
+            const codeText = codeElement.innerText;
+            navigator.clipboard.writeText(codeText).then(() => {
+                // Provide feedback to the user
+                const button = codeElement.parentElement.parentElement.querySelector('.copy-button');
+                const originalText = button.innerText;
+                button.innerText = 'Copied!';
+                button.style.backgroundColor = '#8be9fd'; // Change color to indicate success
+                setTimeout(() => {
+                    button.innerText = originalText;
+                    button.style.backgroundColor = 'rgba(255, 255, 255, 0.2)';
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy: ', err);
+            });
+        }
+
+        // Modify the sendMessage function to handle streaming bot responses with copy buttons
         async function sendMessage() {
             const userInput = document.getElementById('userInput').value.trim();
             if (userInput === '') return;
-    
+
             // Append user message to conversation history
             appendMessage('user', userInput);
             document.getElementById('userInput').value = '';
-    
+
             try {
                 const response = await fetch('http://localhost:5000/chat', {
                     method: 'POST',
@@ -340,52 +431,121 @@
                         message: userInput
                     })
                 });
-    
+
                 if (!response.ok) {
                     const errorData = await response.json();
                     throw new Error(errorData.error || 'API request failed');
                 }
-    
+
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let done = false;
                 let botMessage = '';
-    
-                // Create a new message bubble for the bot
+
                 const messagesDiv = document.getElementById('messages');
+
+                // Create a new message bubble for the bot
                 const messageDiv = document.createElement('div');
                 messageDiv.classList.add('message', 'bot');
                 const textDiv = document.createElement('div');
                 textDiv.classList.add('message-text');
-                messagesDiv.appendChild(messageDiv);
+                // Initialize innerHTML with empty content
+                textDiv.innerHTML = '';
                 messageDiv.appendChild(textDiv);
-                messagesDiv.scrollTop = messagesDiv.scrollHeight;
-    
+                messagesDiv.appendChild(messageDiv);
+
                 while (!done) {
                     const { value, done: doneReading } = await reader.read();
                     done = doneReading;
                     if (value) {
                         const chunk = decoder.decode(value, { stream: true });
                         botMessage += chunk;
-    
+
                         // Update the message with the new chunk
                         textDiv.innerHTML = marked.parse(botMessage);
                         // Highlight the new code blocks
                         textDiv.querySelectorAll('pre code').forEach((block) => {
                             hljs.highlightElement(block);
                         });
-                        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+                        // Re-inject copy buttons into any new code blocks
+                        textDiv.querySelectorAll('pre').forEach((pre) => {
+                            if (!pre.parentElement.classList.contains('code-block-container')) {
+                                const container = document.createElement('div');
+                                container.classList.add('code-block-container');
+                                pre.parentNode.insertBefore(container, pre);
+                                container.appendChild(pre);
+
+                                // Create the copy button
+                                const button = document.createElement('button');
+                                button.classList.add('copy-button');
+                                button.innerText = 'Copy';
+
+                                // Append the button to the container
+                                container.appendChild(button);
+
+                                // Add click event listener to the button
+                                button.addEventListener('click', () => {
+                                    copyCodeToClipboard(pre.querySelector('code'));
+                                });
+                            }
+                        });
+
+                        adjustChatWidth();
+
+                        // Check if the user is near the bottom
+                        const threshold = 100; // px from the bottom
+                        const currentIsAtBottom = messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight < threshold;
+
+                        if (currentIsAtBottom) {
+                            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                        } else {
+                            showNewMessageIndicator();
+                        }
                     }
                 }
-    
-                // Optionally, you can handle post-processing here if needed
-    
+
+                // After the stream is done, ensure all code blocks have copy buttons
+                textDiv.querySelectorAll('pre').forEach((pre) => {
+                    if (!pre.parentElement.classList.contains('code-block-container')) {
+                        const container = document.createElement('div');
+                        container.classList.add('code-block-container');
+                        pre.parentNode.insertBefore(container, pre);
+                        container.appendChild(pre);
+
+                        // Create the copy button
+                        const button = document.createElement('button');
+                        button.classList.add('copy-button');
+                        button.innerText = 'Copy';
+
+                        // Append the button to the container
+                        container.appendChild(button);
+
+                        // Add click event listener to the button
+                        button.addEventListener('click', () => {
+                            copyCodeToClipboard(pre.querySelector('code'));
+                        });
+                    }
+                });
+
             } catch (error) {
                 appendMessage('bot', 'Error: ' + error.message);
                 console.error(error);
             }
         }
-    
+
+        // Function to show the new message indicator
+        function showNewMessageIndicator() {
+            const indicator = document.getElementById('newMessageIndicator');
+            indicator.style.display = 'block';
+        }
+
+        // Function to hide the new message indicator
+        function hideNewMessageIndicator() {
+            const indicator = document.getElementById('newMessageIndicator');
+            indicator.style.display = 'none';
+        }
+
         // Event listeners
         document.getElementById('sendButton').addEventListener('click', sendMessage);
         document.getElementById('userInput').addEventListener('keypress', function(e) {
@@ -394,7 +554,49 @@
             }
         });
         document.getElementById('loadCodebaseButton').addEventListener('click', loadCodebase);
-    
+
+        // New Message Indicator Click Event
+        document.getElementById('newMessageIndicator').addEventListener('click', function() {
+            const messagesDiv = document.getElementById('messages');
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            hideNewMessageIndicator();
+        });
+
+        // Hide the new message indicator when the user scrolls to the bottom manually
+        document.getElementById('messages').addEventListener('scroll', function() {
+            const messagesDiv = this;
+            const threshold = 100; // px from the bottom
+            const atBottom = messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight < threshold;
+            if (atBottom) {
+                hideNewMessageIndicator();
+            }
+        });
+
+        // Function to load the codebase by calling the backend endpoint
+        async function loadCodebase() {
+            try {
+                const response = await fetch('http://localhost:5000/run_codecollector', {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to load codebase.');
+                }
+
+                // Inform the user that the codebase has been loaded
+                appendMessage('bot', 'Codebase loaded successfully. You can now ask questions related to your codebase.');
+
+            } catch (error) {
+                appendMessage('bot', `Error loading codebase: ${error.message}`);
+                console.error(error);
+            }
+        }
+
         // Load config on page load
         window.onload = loadConfig;
     </script>
+
+</body>
+</html>
