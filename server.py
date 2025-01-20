@@ -11,36 +11,28 @@ from datetime import datetime
 import re
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app)
 
-# Setting up logging
 logger = logging.getLogger('PrompterApp')
-logger.setLevel(logging.DEBUG)  # Capture all log levels
+logger.setLevel(logging.DEBUG)
 
-# Create handlers
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)  # Console handler captures INFO and above
+console_handler.setLevel(logging.INFO)
 
 file_handler = logging.FileHandler('app.log')
-file_handler.setLevel(logging.DEBUG)  # File handler captures DEBUG and above
+file_handler.setLevel(logging.DEBUG)
 
-# Create formatters and add them to handlers
 formatter = logging.Formatter(
     '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 console_handler.setFormatter(formatter)
 file_handler.setFormatter(formatter)
-
-# Add handlers to the logger
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
-
 logger.info("Starting PrompterApp...")
 
-# Load configuration
 config = {}
 config_path = 'config.conf'
-
 if os.path.exists(config_path):
     logger.debug(f"Loading configuration from {config_path}")
     with open(config_path, 'r') as f:
@@ -57,7 +49,6 @@ API_KEY = config.get('api_key')
 MODEL = config.get('model', 'gpt-3.5-turbo')
 SCRIPT_NAME = config.get('script_name', 'codecollector')
 CODEBASE_DIR = config.get('codecollector_directory')
-
 DB_HOST = config.get('db_host')
 DB_USER = config.get('db_user')
 DB_PASSWORD = config.get('db_password')
@@ -67,10 +58,8 @@ if not all([API_KEY, SCRIPT_NAME, CODEBASE_DIR, DB_HOST, DB_USER, DB_PASSWORD, D
     logger.critical("Missing required configurations: 'api_key', 'script_name', 'codecollector_directory', 'db_host', 'db_user', 'db_password', or 'db_name'.")
     raise ValueError("Please ensure 'api_key', 'script_name', 'codecollector_directory', 'db_host', 'db_user', 'db_password', and 'db_name' are set in config.conf.")
 
-# Variable to store the codebase content
 codebase_content = ""
 
-# Establish MySQL connection
 def create_db_connection():
     try:
         connection = mysql.connector.connect(
@@ -86,11 +75,9 @@ def create_db_connection():
         logger.exception("Error while connecting to MySQL")
         raise e
 
-# Initialize database and create tables if they don't exist
 def init_db():
     connection = create_db_connection()
     cursor = connection.cursor()
-    # Create chat_history table
     create_chat_history_table = """
     CREATE TABLE IF NOT EXISTS chat_history (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -99,7 +86,6 @@ def init_db():
     )
     """
     cursor.execute(create_chat_history_table)
-    # Create messages table
     create_messages_table = """
     CREATE TABLE IF NOT EXISTS messages (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -111,6 +97,27 @@ def init_db():
     )
     """
     cursor.execute(create_messages_table)
+    # Create scratch_pad table
+    create_scratch_pad_table = """
+    CREATE TABLE IF NOT EXISTS scratch_pad (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        label VARCHAR(255),
+        content TEXT
+    )
+    """
+    cursor.execute(create_scratch_pad_table)
+
+    # Initialize scratch_pad entries if they don't exist
+    cursor.execute("SELECT COUNT(*) FROM scratch_pad")
+    count = cursor.fetchone()[0]
+    if count == 0:
+        labels = ['Prompt 1', 'Prompt 2', 'Prompt 3', 'Prompt 4']
+        for label in labels:
+            cursor.execute(
+                "INSERT INTO scratch_pad (label, content) VALUES (%s, %s)",
+                (label, '')
+            )
+
     connection.commit()
     cursor.close()
     connection.close()
@@ -125,27 +132,18 @@ def run_codecollector():
     """
     global codebase_content
     logger.info("Received request to run codecollector.")
-
     try:
-        # Execute the 'codecollector' command
-        output_file = 'codebase.prompt'  # Adjust if needed
+        output_file = 'codebase.prompt'
         logger.debug(f"Executing subprocess: {SCRIPT_NAME} {CODEBASE_DIR}")
-
-        # Run the command
         subprocess.run([SCRIPT_NAME, CODEBASE_DIR], check=True)
         logger.info("'codecollector' command executed successfully.")
-
-        # Read the output file
         if not os.path.exists(output_file):
             logger.error(f"Output file '{output_file}' not found.")
             return jsonify({'error': f"Output file '{output_file}' not found."}), 500
-
         with open(output_file, 'r', encoding='utf-8') as f:
             codebase_content = f.read()
         logger.info(f"Codebase content loaded from '{output_file}'.")
-
         return jsonify({'message': 'Codebase loaded successfully.'}), 200
-
     except subprocess.CalledProcessError as e:
         logger.exception("Command execution failed.")
         return jsonify({'error': f"Command execution failed: {str(e)}"}), 500
@@ -153,36 +151,65 @@ def run_codecollector():
         logger.exception("An unexpected error occurred.")
         return jsonify({'error': str(ex)}), 500
 
-def generate_stream(openai_response):
-    """
-    Generator function to yield chunks of data from OpenAI's streaming response.
-    """
-    try:
-        for chunk in openai_response.iter_lines():
-            if chunk:
-                # OpenAI streams data with 'data: ' prefix
-                if chunk.startswith(b'data: '):
-                    chunk = chunk[len(b'data: '):]
-                if chunk == b'[DONE]':
-                    logger.debug("Received [DONE] from OpenAI stream.")
-                    break
-                data = json.loads(chunk.decode('utf-8'))
-                delta = data['choices'][0]['delta'].get('content', '')
-                yield delta
-    except Exception as e:
-        logger.exception("Error while generating stream.")
-        yield f"\n[Error]: {str(e)}"
-
 def extract_keywords(text):
     """
     Extracts prominent keywords from the user message for generating chat titles.
     """
-    # Simple keyword extraction using regex (for demonstration purposes)
-    # In production, consider using NLP libraries like RAKE or spaCy
     words = re.findall(r'\b\w+\b', text.lower())
     common_words = {'i', 'the', 'and', 'to', 'a', 'in', 'of', 'for', 'your', 'please', 'include', 'feature', 'new'}
     keywords = [word for word in words if word not in common_words]
-    return ' '.join(keywords[:5])  # Return first 5 keywords
+    return ' '.join(keywords[:5])
+
+@app.route('/update_scratch_pad', methods=['POST'])
+def update_scratch_pad():
+    """
+    Endpoint to update the scratch_pad table with textarea contents.
+    Expects a JSON payload with 'label' and 'content'.
+    """
+    try:
+        data = request.get_json()
+        label = data.get('label')
+        content = data.get('content', '').strip()
+        if not label:
+            logger.warning("No label provided in the request.")
+            return jsonify({'error': 'No label provided.'}), 400
+        connection = create_db_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            "UPDATE scratch_pad SET content = %s WHERE label = %s",
+            (content, label)
+        )
+        connection.commit()
+        logger.info(f"Updated scratch_pad for label '{label}'.")
+        return jsonify({'message': 'Scratch pad updated successfully.'}), 200
+    except Exception as e:
+        logger.exception("Error updating scratch_pad.")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals() and cursor:
+            cursor.close()
+        if 'connection' in locals() and connection.is_connected():
+            connection.close()
+
+@app.route('/get_scratch_pad', methods=['GET'])
+def get_scratch_pad():
+    """
+    Endpoint to retrieve the contents of the scratch_pad table.
+    """
+    try:
+        connection = create_db_connection()
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT label, content FROM scratch_pad")
+        scratch_pad = cursor.fetchall()
+        return jsonify({'scratch_pad': scratch_pad}), 200
+    except Exception as e:
+        logger.exception("Error fetching scratch_pad.")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals() and cursor:
+            cursor.close()
+        if 'connection' in locals() and connection.is_connected():
+            connection.close()
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -193,31 +220,41 @@ def chat():
     """
     global codebase_content
     logger.info("Received chat request.")
-
     try:
         data = request.get_json()
         user_message = data.get('message', '').strip()
-        chat_id = data.get('chat_id')  # Optional, for existing chats
+        chat_id = data.get('chat_id')
 
         if not user_message:
             logger.warning("No message provided in the request.")
             return jsonify({'error': 'No message provided.'}), 400
-
         logger.debug(f"User message: {user_message}")
 
         connection = create_db_connection()
         cursor = connection.cursor()
 
+        # Update 'Prompt 4' in scratch_pad with user's current text area content
+        cursor.execute(
+            "UPDATE scratch_pad SET content = %s WHERE label = %s",
+            (user_message, 'Prompt 4')
+        )
+        connection.commit()
+        logger.debug("Updated 'Prompt 4' in scratch_pad.")
+
+        # Retrieve scratch_pad contents in order
+        cursor.execute(
+            "SELECT content FROM scratch_pad ORDER BY id"
+        )
+        prompts = cursor.fetchall()
+        prompt_texts = [prompt[0] for prompt in prompts]
+
         if chat_id:
-            # Continue existing chat
             logger.debug(f"Continuing existing chat with ID: {chat_id}")
-            # Verify if chat_id exists
             cursor.execute("SELECT id FROM chat_history WHERE id = %s", (chat_id,))
             if cursor.fetchone() is None:
                 logger.warning(f"Chat ID {chat_id} not found.")
                 return jsonify({'error': 'Chat history not found.'}), 404
         else:
-            # Create new chat history
             title = extract_keywords(user_message) or "Untitled Chat"
             created_at = datetime.utcnow()
             cursor.execute("INSERT INTO chat_history (title, created_at) VALUES (%s, %s)", (title, created_at))
@@ -225,7 +262,6 @@ def chat():
             chat_id = cursor.lastrowid
             logger.info(f"Created new chat history with ID: {chat_id} and title: '{title}'")
 
-        # Insert user message
         timestamp = datetime.utcnow()
         cursor.execute(
             "INSERT INTO messages (chat_id, sender, content, timestamp) VALUES (%s, %s, %s, %s)",
@@ -234,51 +270,47 @@ def chat():
         connection.commit()
         logger.debug(f"Inserted user message into chat_id {chat_id}.")
 
-        # Initialize conversation with codebase as part of the user's message
-        if codebase_content:
-            # Adding a separator for clarity
-            combined_message = f"You have access to the following codebase:\n\n{codebase_content}\n\nUser Query:\n{user_message}"
-            logger.debug("Combined user message with codebase content.")
-        else:
-            combined_message = user_message
+        # Combine prompts with labels
+        combined_prompts = ""
+        section_labels = ["[1] Global Instructions", "[2] Project State", "[3] Context", "[4] Task to Perform"]
+        for i, prompt_text in enumerate(prompt_texts):
+            combined_prompts += f"{section_labels[i]}\n{prompt_text}\n\n"
 
-        # Prepare the API request payload
+        if codebase_content:
+            combined_prompts = f"You have access to the following codebase:\n\n{codebase_content}\n\n" + combined_prompts
+            logger.debug("Combined prompts with codebase content.")
+        else:
+            logger.debug("Combined prompts without codebase content.")
+
         api_payload = {
             "model": MODEL,
             "messages": [
-                {"role": "user", "content": combined_message}
+                {"role": "user", "content": combined_prompts}
             ],
-            "stream": True  # Enable streaming
+            "stream": True
         }
-
-        # Make the API request to OpenAI with streaming
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {API_KEY}'
         }
-
         logger.debug("Sending request to OpenAI API.")
         openai_response = requests.post(
             'https://api.openai.com/v1/chat/completions',
             headers=headers,
             json=api_payload,
-            stream=True  # Enable streaming in requests
+            stream=True
         )
-
         if openai_response.status_code != 200:
             error_message = openai_response.json().get('error', {}).get('message', 'API request failed.')
             logger.error(f"OpenAI API request failed: {error_message}")
             return jsonify({'error': error_message}), openai_response.status_code
-
         logger.info("OpenAI API request successful. Streaming response to client.")
 
-        # Insert bot response as it streams
         def generate_and_store():
             bot_response = ""
             try:
                 for chunk in openai_response.iter_lines():
                     if chunk:
-                        # OpenAI streams data with 'data: ' prefix
                         if chunk.startswith(b'data: '):
                             chunk = chunk[len(b'data: '):]
                         if chunk == b'[DONE]':
@@ -288,10 +320,8 @@ def chat():
                         delta = data['choices'][0]['delta'].get('content', '')
                         bot_response += delta
                         yield delta
-                # After streaming is done, insert bot response into DB
-                if bot_response.strip():  # Ensure non-empty response
+                if bot_response.strip():
                     try:
-                        # Establish a new connection for insertion
                         bot_conn = create_db_connection()
                         bot_cursor = bot_conn.cursor()
                         bot_timestamp = datetime.utcnow()
@@ -316,7 +346,6 @@ def chat():
                 yield f"\n[Error]: {str(e)}"
 
         return Response(generate_and_store(), mimetype='text/plain')
-
     except Exception as e:
         logger.exception("An unexpected error occurred during chat processing.")
         return jsonify({'error': str(e)}), 500
@@ -354,13 +383,11 @@ def get_chat_history(chat_id):
     try:
         connection = create_db_connection()
         cursor = connection.cursor(dictionary=True)
-        # Verify chat_id exists
         cursor.execute("SELECT id, title, created_at FROM chat_history WHERE id = %s", (chat_id,))
         chat = cursor.fetchone()
         if not chat:
             logger.warning(f"Chat history with id {chat_id} not found.")
             return jsonify({'error': 'Chat history not found.'}), 404
-        # Fetch messages
         cursor.execute(
             "SELECT sender, content, timestamp FROM messages WHERE chat_id = %s ORDER BY timestamp ASC",
             (chat_id,)

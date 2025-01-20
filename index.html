@@ -1,126 +1,108 @@
-<!-- File: /home/brandon/Projects/prompter/index.html -->
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>OpenAI Chat with Codebase Integration</title>
-    <!-- Bootstrap CSS for Basic Styling -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Highlight.js CSS for Syntax Highlighting -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/base16/dracula.min.css" rel="stylesheet">
-    <!-- Custom CSS for Dark Theme and Enhanced Code Blocks -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.3.1/styles/default.min.css" rel="stylesheet">
     <style>
-        /* General Background and Text */
         body {
-            background-color: #282a36; /* Dark Background */
-            color: #f8f8f2; /* Light Text */
+            background-color: #1a1a1a;
+            color: #f0f0f0;
             font-family: Arial, sans-serif;
             padding: 20px;
             display: flex;
             height: 100vh;
-            overflow: hidden; /* Prevent body from scrolling */
+            overflow: hidden; 
         }
-
-        /* Sidebar Styling */
         .sidebar {
             width: 250px;
-            background-color: #3a3f4b;
+            background-color: #2a2a2a;
             border-radius: 10px;
             padding: 20px;
             margin-right: 20px;
             overflow-y: auto;
         }
-
-        .sidebar h4 {
-            color: #50fa7b;
+        .right-sidebar {
+            width: 500px;
+            background-color: #2a2a2a;
+            border-radius: 10px;
+            padding: 20px;
+            margin-left: 20px;
+            overflow-y: auto;
+        }
+        .sidebar h4, .right-sidebar h4 {
+            color: #f0f0f0;
             margin-bottom: 15px;
             text-align: center;
         }
-
         .history-item {
-            background-color: #44475a;
+            background-color: #3a3a3a;
             padding: 10px;
             border-radius: 5px;
             margin-bottom: 10px;
             cursor: pointer;
             transition: background-color 0.3s ease;
         }
-
         .history-item:hover {
-            background-color: #50fa7b;
-            color: #282a36;
+            background-color: #4a4a4a;
+            color: #fff;
         }
-
         .history-title {
             font-weight: bold;
         }
-
         .history-date {
             font-size: 0.8rem;
-            color: #6272a4;
+            color: #ccc;
         }
-
-        /* Chat Container Styling */
         .chat-container {
             flex: 1;
-            background-color: #3a3f4b; /* Container Background */
+            background-color: #2a2a2a;
             border-radius: 10px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-            padding: 20px; /* Added padding */
-            position: relative; /* For positioning the new message indicator */
+            padding: 20px; 
+            position: relative; 
             display: flex;
             flex-direction: column;
             height: 100%;
-            overflow: hidden; /* Hide any overflowing content */
+            overflow: hidden; 
         }
-
-        /* Header */
         .chat-container h3 {
-            color: #50fa7b; /* Accent Color */
+            color: #f0f0f0;
             font-weight: bold;
             text-align: center;
             margin-bottom: 20px;
         }
-
-        /* Messages Area */
         #messages {
             flex: 1;
             overflow-y: auto;
             padding-right: 10px;
             margin-bottom: 20px;
-            position: relative; /* For positioning the new message indicator */
+            position: relative; 
         }
-
-        /* Scroll Indicator Styling */
         #newMessageIndicator {
             position: absolute;
-            bottom: 70px; /* Positioned above the input area */
+            bottom: 70px; 
             left: 50%;
             transform: translateX(-50%);
-            background-color: #50fa7b;
-            color: #282a36;
+            background-color: #444;
+            color: #fff;
             padding: 5px 10px;
             border-radius: 15px;
             cursor: pointer;
-            display: none; /* Hidden by default */
+            display: none; 
             z-index: 10;
         }
-
-        /* Message Styling */
         .message {
             margin-bottom: 15px;
             display: flex;
         }
-
         .message.user {
             justify-content: flex-end;
         }
-
         .message.bot {
             justify-content: flex-start;
         }
-
         .message-text {
             padding: 10px 15px;
             border-radius: 15px;
@@ -128,108 +110,89 @@
             word-wrap: break-word;
             font-size: 1rem;
             line-height: 1.5;
-            position: relative; /* For positioning child elements like the copy button */
+            position: relative; 
             display: inline-block;
         }
-
-        /* User Message Bubble */
         .message.user .message-text {
-            background-color: #44475a;
-            color: #f8f8f2;
+            background-color: #007bff;
+            color: #fff;
         }
-
-        /* Bot Message Bubble */
         .message.bot .message-text {
-            background-color: #3a3f4b;
-            color: #f8f8f2;
+            background-color: #444;
+            color: #f0f0f0;
         }
-
-        /* Markdown Content Styling */
         .message.bot .message-text h1,
         .message.bot .message-text h2,
         .message.bot .message-text h3,
         .message.bot .message-text h4,
         .message.bot .message-text h5,
         .message.bot .message-text h6 {
-            color: #8be9fd;
+            color: #fff;
         }
-
         .message.bot .message-text a {
-            color: #8be9fd;
+            color: #66f;
             text-decoration: none;
         }
-
         .message.bot .message-text a:hover {
             text-decoration: underline;
         }
-
-        /* Enhanced Code Block Styling */
-        /* Allow Highlight.js to Style Code Blocks and Add Darker Background */
         .message.bot .message-text pre {
-            background-color: #1e1e1e !important; /* Darker Gray/Black Background */
+            background-color: #1e1e1e;
             padding: 15px;
             border-radius: 5px;
             overflow-x: auto;
-            margin: 10px 0; /* Add some margin for spacing */
-            white-space: pre; /* Prevent wrapping */
+            margin: 10px 0; 
+            white-space: pre; 
         }
-
         .message.bot .message-text code {
-            background-color: transparent; /* Let pre handle background */
-            color: inherit; /* Let Highlight.js handle color */
+            background-color: transparent; 
+            color: inherit; 
             padding: 0;
             border-radius: 4px;
         }
-
-        /* Copy Button Styling */
         .copy-button {
             position: absolute;
             top: 8px;
             right: 8px;
             background-color: rgba(255, 255, 255, 0.2);
             border: none;
-            color: #f8f8f2;
+            color: #f0f0f0;
             padding: 5px 10px;
             font-size: 0.9rem;
             border-radius: 5px;
             cursor: pointer;
             transition: background-color 0.3s ease, color 0.3s ease;
         }
-
         .copy-button:hover {
-            background-color: #50fa7b;
-            color: #282a36;
+            background-color: #555;
+            color: #fff;
         }
-
-        /* Necessary for positioning the copy button relative to the code block */
         .code-block-container {
             position: relative;
             display: inline-block;
             max-width: 100%;
         }
-
-        /* Input and Button Styling */
         .input-group {
             display: flex;
+            flex-direction: column;
             gap: 10px;
+            align-items: flex-start;
         }
-
-        #userInput {
-            flex: 1;
-            background-color: #44475a;
-            color: #f8f8f2;
-            border: 1px solid #6272a4;
+        .input-group .form-control {
+            background-color: #1e1e1e;
+            color: #f0f0f0;
+            border: 1px solid #444;
             border-radius: 5px;
             padding: 10px;
+            width: 100%;
+            height: 100px;
         }
-
-        #userInput::placeholder {
-            color: #6272a4;
+        .input-group .form-control::placeholder {
+            color: #888;
         }
-
-        #sendButton, #loadCodebaseButton {
-            background-color: #50fa7b;
-            color: #282a36;
+        .input-group .btn {
+            background-color: #007bff;
+            color: #fff;
             border: none;
             border-radius: 5px;
             padding: 0 20px;
@@ -237,113 +200,108 @@
             transition: background-color 0.3s ease;
             white-space: nowrap;
         }
-
-        #sendButton:hover, #loadCodebaseButton:hover {
-            background-color: #40e07b;
+        .input-group .btn:hover {
+            background-color: #0056b3;
         }
-
-        /* Scrollbar Styling */
-        #messages::-webkit-scrollbar {
+        ::-webkit-scrollbar {
             width: 8px;
         }
-
-        #messages::-webkit-scrollbar-track {
-            background: #3a3f4b;
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a;
         }
-
-        #messages::-webkit-scrollbar-thumb {
-            background-color: #6272a4;
+        ::-webkit-scrollbar-thumb {
+            background-color: #555;
             border-radius: 4px;
         }
-
         .sidebar::-webkit-scrollbar {
             width: 8px;
         }
-
         .sidebar::-webkit-scrollbar-track {
-            background: #3a3f4b;
+            background: #1a1a1a;
         }
-
         .sidebar::-webkit-scrollbar-thumb {
-            background-color: #6272a4;
+            background-color: #555;
             border-radius: 4px;
         }
-
-        /* Responsive Adjustments */
+        .right-sidebar::-webkit-scrollbar {
+            width: 8px;
+        }
+        .right-sidebar::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+        .right-sidebar::-webkit-scrollbar-thumb {
+            background-color: #555;
+            border-radius: 4px;
+        }
         @media (max-width: 992px) {
             body {
                 flex-direction: column;
             }
-
-            .sidebar {
+            .sidebar, .right-sidebar {
                 width: 100%;
                 margin-right: 0;
+                margin-left: 0;
                 margin-bottom: 20px;
                 height: 200px;
             }
-
             .chat-container {
-                height: calc(100vh - 240px); /* Adjust based on sidebar height */
+                height: calc(100vh - 480px); 
             }
         }
     </style>
 </head>
 <body>
-
     <div class="sidebar">
         <h4>Chat History</h4>
         <div id="historyList">
-            <!-- History items will be appended here -->
         </div>
     </div>
-
     <div class="chat-container">
         <h3>OpenAI Chat</h3>
         <div id="messages" class="mb-3">
-            <!-- Messages will appear here -->
-            <!-- New Message Indicator -->
             <div id="newMessageIndicator">New messages</div>
         </div>
         <div class="input-group mb-2">
-            <input type="text" id="userInput" class="form-control" placeholder="Type your message...">
+            <textarea id="userInput" class="form-control" placeholder="Type your message..."></textarea>
+        </div>
+        <div class="input-group">
             <button class="btn" id="sendButton">Send</button>
         </div>
         <div class="input-group">
             <button class="btn" id="loadCodebaseButton">Load Codebase</button>
         </div>
     </div>
-
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/python.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/bash.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/xml.min.js"></script> <!-- For HTML -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/css.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/javascript.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/java.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/kotlin.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/typescript.min.js"></script>
+    <div class="right-sidebar">
+        <h4>Master Prompts</h4>
+        <div class="input-group mb-2">
+            <label for="prompt1">[1] Global Instructions</label>
+            <textarea id="prompt1" class="form-control" placeholder="Enter global instructions..."></textarea>
+        </div>
+        <div class="input-group mb-2">
+            <label for="prompt2">[2] Project State</label>
+            <textarea id="prompt2" class="form-control" placeholder="Enter project state..."></textarea>
+        </div>
+        <div class="input-group mb-2">
+            <label for="prompt3">[3] Context</label>
+            <textarea id="prompt3" class="form-control" placeholder="Enter context..."></textarea>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.3.1/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <script>
         hljs.configure({
             languages: ['python', 'bash', 'xml', 'css', 'javascript', 'java', 'kotlin', 'typescript']
         });
-        // Do not call highlightAll() here to avoid premature highlighting
     </script>
-
-    <!-- Marked.js for Markdown Parsing -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <!-- Custom JavaScript for Chat Functionality -->
     <script>
         let apiKey = '';
-        let model = 'gpt-3.5-turbo'; // Default model
-        let currentChatId = null; // To track the current chat
-
-        // Initialize conversation history
+        let model = 'gpt-3.5-turbo';
+        let currentChatId = null;
         const conversation = [];
-
-        // Variable to store the codebase content
         let codebaseContent = '';
-
-        // Function to load configuration from config.conf
         async function loadConfig() {
             try {
                 const response = await fetch('config.conf');
@@ -362,8 +320,6 @@
                 console.error(error);
             }
         }
-
-        // Simple parser for key=value pairs
         function parseConfig(text) {
             const lines = text.split('\n');
             const config = {};
@@ -375,103 +331,71 @@
             });
             return config;
         }
-
-        // Configure Marked.js to use Highlight.js for syntax highlighting
         marked.setOptions({
             highlight: function(code, language) {
-                // Allowed languages
                 const allowedLanguages = ['python', 'bash', 'xml', 'css', 'javascript', 'java', 'kotlin', 'typescript'];
                 if (language && allowedLanguages.includes(language.toLowerCase())) {
                     return hljs.highlight(code, { language }).value;
                 } else {
-                    // Auto-detect language from allowed languages
                     const result = hljs.highlightAuto(code, allowedLanguages);
                     return result.value;
                 }
             },
-            langPrefix: 'hljs language-', // Highlight.js expects a top-level 'hljs' class.
-            breaks: true, // Convert '\n' in paragraphs into <br>
-            gfm: true // GitHub Flavored Markdown
+            langPrefix: 'hljs language-',
+            breaks: true,
+            gfm: true
         });
-
-        // Function to append a message to the chat
         function appendMessage(sender, text) {
             const messagesDiv = document.getElementById('messages');
-
             const messageDiv = document.createElement('div');
             messageDiv.classList.add('message', sender);
-
             const textDiv = document.createElement('div');
             textDiv.classList.add('message-text');
-
             if (sender === 'bot') {
-                // Parse Markdown and set as HTML with syntax highlighting
                 textDiv.innerHTML = marked.parse(text);
-                // After setting innerHTML, ensure Highlight.js has processed the code blocks
                 textDiv.querySelectorAll('pre code').forEach((block) => {
                     hljs.highlightElement(block);
                 });
-
-                // Wrap the code blocks in a container to position the copy button
                 textDiv.querySelectorAll('pre').forEach((pre) => {
                     const container = document.createElement('div');
                     container.classList.add('code-block-container');
                     pre.parentNode.insertBefore(container, pre);
                     container.appendChild(pre);
-
-                    // Create the copy button
                     const button = document.createElement('button');
                     button.classList.add('copy-button');
                     button.innerText = 'Copy';
-
-                    // Append the button to the container
                     container.appendChild(button);
-
-                    // Add click event listener to the button
                     button.addEventListener('click', () => {
                         copyCodeToClipboard(pre.querySelector('code'));
                     });
                 });
             } else {
-                // For user messages, display as plain text
                 textDiv.textContent = text;
             }
-
             messageDiv.appendChild(textDiv);
             messagesDiv.appendChild(messageDiv);
-
             adjustChatWidth();
-
-            // Scroll to the bottom only if the user is already near the bottom
-            const threshold = 100; // px from the bottom
+            const threshold = 100;
             const isAtBottom = messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight < threshold;
             if (isAtBottom) {
                 messagesDiv.scrollTop = messagesDiv.scrollHeight;
             } else {
-                // Show new message indicator if not at bottom and sender is bot
                 if (sender === 'bot') {
                     showNewMessageIndicator();
                 }
             }
         }
-
-        // Function to adjust the chat container's width based on the widest message
         function adjustChatWidth() {
-            // Removed dynamic width adjustment to maintain consistent container size
-            // Ensure the chat container does not exceed the maximum width
             const chatContainer = document.querySelector('.chat-container');
-            chatContainer.style.width = '100%'; // Ensure it uses the CSS-defined width
+            chatContainer.style.width = '100%';
         }
-
-        // Function to copy code to clipboard
         function copyCodeToClipboard(codeElement) {
             const codeText = codeElement.innerText;
             navigator.clipboard.writeText(codeText).then(() => {
-                // Provide feedback to the user
                 const button = codeElement.parentElement.parentElement.querySelector('.copy-button');
                 const originalText = button.innerText;
                 button.innerText = 'Copied!';
-                button.style.backgroundColor = '#8be9fd'; // Change color to indicate success
+                button.style.backgroundColor = '#28a745';
                 setTimeout(() => {
                     button.innerText = originalText;
                     button.style.backgroundColor = 'rgba(255, 255, 255, 0.2)';
@@ -480,93 +404,65 @@
                 console.error('Failed to copy: ', err);
             });
         }
-
-        // Function to fetch and display chat histories
         async function loadChatHistories() {
             try {
                 const response = await fetch('http://localhost:5000/history');
                 const data = await response.json();
-
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to fetch chat histories.');
                 }
-
                 const histories = data.histories;
                 const historyList = document.getElementById('historyList');
-                historyList.innerHTML = ''; // Clear existing
-
+                historyList.innerHTML = '';
                 histories.forEach(history => {
                     const historyItem = document.createElement('div');
                     historyItem.classList.add('history-item');
                     historyItem.dataset.chatId = history.id;
-
                     const title = document.createElement('div');
                     title.classList.add('history-title');
                     title.textContent = history.title || 'Untitled Chat';
-
                     const date = document.createElement('div');
                     date.classList.add('history-date');
                     const localDate = new Date(history.created_at).toLocaleString();
                     date.textContent = localDate;
-
                     historyItem.appendChild(title);
                     historyItem.appendChild(date);
-
                     historyItem.addEventListener('click', () => {
                         loadSpecificChat(history.id);
                     });
-
                     historyList.appendChild(historyItem);
                 });
-
             } catch (error) {
                 alert('Error loading chat histories: ' + error.message);
                 console.error(error);
             }
         }
-
-        // Function to load a specific chat history
         async function loadSpecificChat(chatId) {
             try {
                 const response = await fetch(`http://localhost:5000/history/${chatId}`);
                 const data = await response.json();
-
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to fetch chat history.');
                 }
-
                 const { chat, messages } = data;
-
-                // Set currentChatId
                 currentChatId = chat.id;
-
-                // Clear current messages
                 const messagesDiv = document.getElementById('messages');
                 messagesDiv.innerHTML = '<div id="newMessageIndicator">New messages</div>';
-
-                // Append messages
                 messages.forEach(msg => {
                     appendMessage(msg.sender, msg.content);
                 });
-
-                // Scroll to bottom
                 messagesDiv.scrollTop = messagesDiv.scrollHeight;
-
             } catch (error) {
                 alert('Error loading chat history: ' + error.message);
                 console.error(error);
             }
         }
-
-        // Modify the sendMessage function to handle streaming bot responses with copy buttons
         async function sendMessage() {
             const userInput = document.getElementById('userInput').value.trim();
             if (userInput === '') return;
-
-            // Append user message to conversation history
             appendMessage('user', userInput);
             document.getElementById('userInput').value = '';
-
+            await updateScratchPad('Prompt 4', userInput);
             try {
                 const response = await fetch('http://localhost:5000/chat', {
                     method: 'POST',
@@ -575,86 +471,61 @@
                     },
                     body: JSON.stringify({
                         message: userInput,
-                        chat_id: currentChatId // Send currentChatId to associate the message
+                        chat_id: currentChatId
                     })
                 });
-
                 if (!response.ok) {
                     const errorData = await response.json();
                     throw new Error(errorData.error || 'API request failed');
                 }
-
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let doneReading = false;
                 let botMessage = '';
-
                 const messagesDiv = document.getElementById('messages');
-
-                // Create a new message bubble for the bot if not loading an existing chat
                 if (!currentChatId) {
                     const messageDiv = document.createElement('div');
                     messageDiv.classList.add('message', 'bot');
                     const textDiv = document.createElement('div');
                     textDiv.classList.add('message-text');
-                    // Initialize innerHTML with empty content
                     textDiv.innerHTML = '';
                     messageDiv.appendChild(textDiv);
                     messagesDiv.appendChild(messageDiv);
                 }
-
-                // Select the last bot message
                 const lastBotMessage = messagesDiv.querySelectorAll('.message.bot').length > 0 ?
                     messagesDiv.querySelectorAll('.message.bot')[messagesDiv.querySelectorAll('.message.bot').length - 1] :
                     null;
-
                 if (lastBotMessage) {
                     var textDiv = lastBotMessage.querySelector('.message-text');
                 }
-
                 while (!doneReading) {
                     const { value, done } = await reader.read();
                     doneReading = done;
                     if (value) {
                         const chunk = decoder.decode(value, { stream: true });
                         botMessage += chunk;
-
-                        // Update the message with the new chunk
                         textDiv.innerHTML = marked.parse(botMessage);
-                        // Highlight the new code blocks
                         textDiv.querySelectorAll('pre code').forEach((block) => {
                             hljs.highlightElement(block);
                         });
-
-                        // Re-inject copy buttons into any new code blocks
                         textDiv.querySelectorAll('pre').forEach((pre) => {
                             if (!pre.parentElement.classList.contains('code-block-container')) {
                                 const container = document.createElement('div');
                                 container.classList.add('code-block-container');
                                 pre.parentNode.insertBefore(container, pre);
                                 container.appendChild(pre);
-
-                                // Create the copy button
                                 const button = document.createElement('button');
                                 button.classList.add('copy-button');
                                 button.innerText = 'Copy';
-
-                                // Append the button to the container
                                 container.appendChild(button);
-
-                                // Add click event listener to the button
                                 button.addEventListener('click', () => {
                                     copyCodeToClipboard(pre.querySelector('code'));
                                 });
                             }
                         });
-
                         adjustChatWidth();
-
-                        // Check if the user is near the bottom
-                        const threshold = 100; // px from the bottom
+                        const threshold = 100;
                         const currentIsAtBottom = messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight < threshold;
-
                         if (currentIsAtBottom) {
                             messagesDiv.scrollTop = messagesDiv.scrollHeight;
                         } else {
@@ -662,82 +533,111 @@
                         }
                     }
                 }
-
             } catch (error) {
                 appendMessage('bot', 'Error: ' + error.message);
                 console.error(error);
             }
         }
-
-        // Function to show the new message indicator
         function showNewMessageIndicator() {
             const indicator = document.getElementById('newMessageIndicator');
             indicator.style.display = 'block';
         }
-
-        // Function to hide the new message indicator
         function hideNewMessageIndicator() {
             const indicator = document.getElementById('newMessageIndicator');
             indicator.style.display = 'none';
         }
-
-        // Event listeners
         document.getElementById('sendButton').addEventListener('click', sendMessage);
-        document.getElementById('userInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
+        document.getElementById('userInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
                 sendMessage();
             }
         });
         document.getElementById('loadCodebaseButton').addEventListener('click', loadCodebase);
-
-        // New Message Indicator Click Event
         document.getElementById('newMessageIndicator').addEventListener('click', function() {
             const messagesDiv = document.getElementById('messages');
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
             hideNewMessageIndicator();
         });
-
-        // Hide the new message indicator when the user scrolls to the bottom manually
         document.getElementById('messages').addEventListener('scroll', function() {
             const messagesDiv = this;
-            const threshold = 100; // px from the bottom
+            const threshold = 100;
             const atBottom = messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight < threshold;
             if (atBottom) {
                 hideNewMessageIndicator();
             }
         });
-
-        // Function to load the codebase by calling the backend endpoint
         async function loadCodebase() {
             try {
                 const response = await fetch('http://localhost:5000/run_codecollector', {
                     method: 'POST'
                 });
-
                 const data = await response.json();
-
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to load codebase.');
                 }
-
-                // Inform the user that the codebase has been loaded
                 appendMessage('bot', 'Codebase loaded successfully. You can now ask questions related to your codebase.');
-
             } catch (error) {
                 appendMessage('bot', `Error loading codebase: ${error.message}`);
                 console.error(error);
             }
         }
-
-        // Function to initialize and load chat histories on page load
         async function initializeChat() {
             await loadConfig();
             await loadChatHistories();
+            await loadScratchPad();
         }
-
-        // Load config on page load and initialize histories
+        async function updateScratchPad(label, content) {
+            try {
+                const response = await fetch('http://localhost:5000/update_scratch_pad', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        label: label,
+                        content: content
+                    })
+                });
+                if (!response.ok) {
+                    throw new Error('Failed to update scratch pad.');
+                }
+                console.log(`Scratch pad updated for ${label}`);
+            } catch (error) {
+                console.error('Error updating scratch pad:', error);
+            }
+        }
+        async function loadScratchPad() {
+            try {
+                const response = await fetch('http://localhost:5000/get_scratch_pad');
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to load scratch pad.');
+                }
+                const scratchPad = data.scratch_pad;
+                scratchPad.forEach(entry => {
+                    if (entry.label === 'Prompt 1') {
+                        document.getElementById('prompt1').value = entry.content;
+                    } else if (entry.label === 'Prompt 2') {
+                        document.getElementById('prompt2').value = entry.content;
+                    } else if (entry.label === 'Prompt 3') {
+                        document.getElementById('prompt3').value = entry.content;
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading scratch pad:', error);
+            }
+        }
+        document.getElementById('prompt1').addEventListener('change', function() {
+            updateScratchPad('Prompt 1', this.value);
+        });
+        document.getElementById('prompt2').addEventListener('change', function() {
+            updateScratchPad('Prompt 2', this.value);
+        });
+        document.getElementById('prompt3').addEventListener('change', function() {
+            updateScratchPad('Prompt 3', this.value);
+        });
         window.onload = initializeChat;
     </script>
-
 </body>
 </html>
