@@ -212,6 +212,28 @@
             background-color: #6272a4;
             border-radius: 4px;
         }
+        #tokenCounterContainer {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .token-counter {
+            display: flex;
+            align-items: center;
+            background-color: #44475a;
+            padding: 5px 10px;
+            border-radius: 5px;
+        }
+        .token-counter span {
+            font-size: 1rem;
+            color: #f8f8f2;
+            margin-left: 5px; 
+        }
+        .token-label {
+            font-size: 1rem;
+            color: #f8f8f2;
+            margin-right: 5px;
+        }
         @media (max-width: 992px) {
             body {
                 flex-direction: column;
@@ -241,11 +263,23 @@
         </div>
         <div class="input-group mb-2">
             <input type="text" id="userInput" class="form-control" placeholder="Type your message...">
-            <button class="btn" id="sendButton">Send</button>
+            <div style="display: flex; align-items: center;">
+                <button class="btn" id="sendButton">Send</button>
+            </div>
         </div>
         <div class="input-group mb-2">
             <button class="btn" id="loadCodebaseButton">Load Codebase</button>
             <button class="btn" id="toggleChatHistoryButton">Chat On</button>
+            <div id="tokenCounterContainer">
+                <div class="token-counter">
+                    <span class="token-label">Input Tokens:</span>
+                    <span id="inputTokenCount">0</span>
+                </div>
+                <div class="token-counter">
+                    <span class="token-label">Output Tokens:</span>
+                    <span id="outputTokenCount">0</span>
+                </div>
+            </div>
         </div>
     </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
@@ -257,23 +291,57 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/java.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/kotlin.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/typescript.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
         hljs.configure({
             languages: ['python', 'bash', 'xml', 'css', 'javascript', 'java', 'kotlin', 'typescript']
         });
         // Do not call highlightAll() here to avoid premature highlighting
-    </script>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script>
-        let apiKey = '';
-        let model = 'gpt-3.5-turbo'; // Default model
-        let currentChatId = null; // To track the current chat
-        let chatHistoryEnabled = true; // Chat history is enabled by default
         // Initialize conversation history
         const conversation = [];
         // Variable to store the codebase content
         let codebaseContent = '';
-        // Function to load configuration from config.conf
+        // Token Counter Elements
+        const inputTokenCounter = document.getElementById('inputTokenCount');
+        const outputTokenCounter = document.getElementById('outputTokenCount');
+        // Variable to debounce token counting
+        let debounceTimer;
+        const DEBOUNCE_DELAY = 300; // milliseconds
+        // Function to update input token count by calling the backend
+        async function updateInputTokenCount() {
+            const userInput = document.getElementById('userInput').value;
+            const payload = {
+                new_message: userInput
+            };
+            if (currentChatId) {
+                payload.chat_id = currentChatId;
+            }
+            try {
+                const response = await fetch('http://localhost:5000/count_tokens', { // Using absolute URL
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    inputTokenCounter.textContent = data.input_token_count;
+                } else {
+                    inputTokenCounter.textContent = '0';
+                    console.error(data.error || 'Error counting tokens');
+                }
+            } catch (error) {
+                console.error('Error counting tokens:', error);
+                inputTokenCounter.textContent = '0';
+            }
+        }
+        // Event listener to update input token count as user types with debouncing
+        document.getElementById('userInput').addEventListener('input', function() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(updateInputTokenCount, DEBOUNCE_DELAY);
+        });
+        // Function to load configuration from config.conf (if needed)
         async function loadConfig() {
             try {
                 const response = await fetch('config.conf');
@@ -398,7 +466,7 @@
         // Function to fetch and display chat histories
         async function loadChatHistories() {
             try {
-                const response = await fetch('http://localhost:5000/history');
+                const response = await fetch('http://localhost:5000/history'); // Using absolute URL
                 const data = await response.json();
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to fetch chat histories.');
@@ -432,7 +500,7 @@
         // Function to load a specific chat history
         async function loadSpecificChat(chatId) {
             try {
-                const response = await fetch(`http://localhost:5000/history/${chatId}`);
+                const response = await fetch(`http://localhost:5000/history/${chatId}`); // Using absolute URL
                 const data = await response.json();
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to fetch chat history.');
@@ -449,18 +517,28 @@
                 });
                 // Scroll to bottom
                 messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                // Update token counts based on loaded messages
+                await updateInputTokenCount();
+                // Reset Output Tokens
+                outputTokenCounter.textContent = '0';
             } catch (error) {
                 alert('Error loading chat history: ' + error.message);
                 console.error(error);
             }
         }
-        // Modify the sendMessage function to handle streaming bot responses with copy buttons
+        // Variable to track the current chat ID
+        let currentChatId = null;
+        // Variable to track if chat history is enabled
+        let chatHistoryEnabled = true;
+        // Modify the sendMessage function to handle streaming bot responses with copy buttons and output token counting
         async function sendMessage() {
             const userInput = document.getElementById('userInput').value.trim();
             if (userInput === '') return;
             // Append user message to conversation history
             appendMessage('user', userInput);
             document.getElementById('userInput').value = '';
+            inputTokenCounter.textContent = '0'; // Reset input token count after sending
+            outputTokenCounter.textContent = '0'; // Reset output token count for new response
             try {
                 const payload = {
                     message: userInput
@@ -468,7 +546,7 @@
                 if (chatHistoryEnabled && currentChatId) {
                     payload.chat_id = currentChatId;
                 }
-                const response = await fetch('http://localhost:5000/chat', {
+                const response = await fetch('http://localhost:5000/chat', { // Using absolute URL
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -507,6 +585,13 @@
                     doneReading = done;
                     if (value) {
                         const chunk = decoder.decode(value, { stream: true });
+                        // Check if the chunk contains the TOKEN_COUNT
+                        const tokenCountMatch = chunk.match(/\[TOKEN_COUNT: (\d+)\]/);
+                        if (tokenCountMatch) {
+                            const outputTokens = parseInt(tokenCountMatch[1], 10);
+                            outputTokenCounter.textContent = outputTokens;
+                            continue; // Skip appending this to the chat
+                        }
                         botMessage += chunk;
                         // Update the message with the new chunk
                         textDiv.innerHTML = marked.parse(botMessage);
@@ -540,6 +625,7 @@
                         if (currentIsAtBottom) {
                             messagesDiv.scrollTop = messagesDiv.scrollHeight;
                         } else {
+                            // Show new message indicator if not at bottom and sender is bot
                             showNewMessageIndicator();
                         }
                     }
@@ -586,7 +672,7 @@
         // Function to load the codebase by calling the backend endpoint
         async function loadCodebase() {
             try {
-                const response = await fetch('http://localhost:5000/run_codecollector', {
+                const response = await fetch('http://localhost:5000/run_codecollector', { // Using absolute URL
                     method: 'POST'
                 });
                 const data = await response.json();
@@ -595,6 +681,8 @@
                 }
                 // Inform the user that the codebase has been loaded
                 appendMessage('bot', 'Codebase loaded successfully. You can now ask questions related to your codebase.');
+                // Update the input token count since codebase is part of the system message
+                await updateInputTokenCount();
             } catch (error) {
                 appendMessage('bot', `Error loading codebase: ${error.message}`);
                 console.error(error);
@@ -607,13 +695,9 @@
             if (chatHistoryEnabled) {
                 toggleButton.innerText = 'Chat On';
                 toggleButton.style.backgroundColor = '#50fa7b';
-                // Optionally, you can set currentChatId to null to start fresh conversations
-                // currentChatId = null;
             } else {
                 toggleButton.innerText = 'Chat Off';
                 toggleButton.style.backgroundColor = '#ff5555';
-                // Optionally, clear currentChatId to prevent sending chat_id
-                // currentChatId = null;
             }
         }
         // Function to initialize and load chat histories on page load

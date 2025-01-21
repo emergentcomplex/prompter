@@ -9,6 +9,7 @@ import mariadb
 from mariadb import Error
 from datetime import datetime
 import re
+import tiktoken
 
 app = Flask(__name__)
 CORS(app)
@@ -35,7 +36,7 @@ logger.addHandler(file_handler)
 logger.info("Starting PrompterApp...")
 
 config = {}
-config_path = 'config.conf'
+config_path = '/home/brandon/Projects/prompter/config.conf'
 if os.path.exists(config_path):
     logger.debug(f"Loading configuration from {config_path}")
     with open(config_path, 'r') as f:
@@ -111,6 +112,36 @@ def init_db():
 
 init_db()
 
+def count_tokens(messages, model=MODEL):
+    """
+    Counts the number of tokens in the messages list based on the model's tokenization.
+    """
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+    except KeyError:
+        logger.warning(f"Model {model} not found. Using cl100k_base encoding.")
+        encoding = tiktoken.get_encoding('cl100k_base')
+
+    if model.startswith("gpt-4"):
+        tokens_per_message = 3
+        tokens_per_name = 1
+    elif model.startswith("gpt-3.5-turbo"):
+        tokens_per_message = 4
+        tokens_per_name = -1
+    else:
+        tokens_per_message = 3
+        tokens_per_name = 1
+
+    token_count = 0
+    for message in messages:
+        token_count += tokens_per_message
+        for key, value in message.items():
+            token_count += len(encoding.encode(value))
+            if key == "name":
+                token_count += tokens_per_name
+    token_count += 3  # Every reply is primed with <|start|>assistant<|message|>
+    return token_count
+
 @app.route('/run_codecollector', methods=['POST'])
 def run_codecollector():
     """
@@ -119,7 +150,7 @@ def run_codecollector():
     global codebase_content
     logger.info("Received request to run codecollector.")
     try:
-        output_file = 'codebase.prompt'
+        output_file = '/home/brandon/Projects/prompter/codebase.prompt'
         logger.debug(f"Executing subprocess: {SCRIPT_NAME} {CODEBASE_DIR}")
         subprocess.run([SCRIPT_NAME, CODEBASE_DIR], check=True)
         logger.info("'codecollector' command executed successfully.")
@@ -165,12 +196,67 @@ def extract_keywords(text):
     keywords = [word for word in words if word not in common_words]
     return ' '.join(keywords[:5])
 
+
+@app.route('/count_tokens', methods=['POST'])
+def count_tokens_route():
+    """
+    Endpoint to count tokens based on the full input including assistant message, conversation history, and new message.
+    Expects a JSON payload with 'chat_id' (optional) and 'new_message'.
+    """
+    try:
+        data = request.get_json()
+        chat_id = data.get('chat_id')
+        new_message = data.get('new_message', '').strip()
+        if not new_message:
+            return jsonify({'error': 'No new_message provided.'}), 400
+
+        messages = []
+
+        # Add assistant message with codebase_content
+        if codebase_content:
+            assistant_message = f"You have access to the following codebase:\n\n{codebase_content}"
+            messages.append({"role": "assistant", "content": assistant_message})
+            logger.debug("Added assistant message with codebase content to messages for token counting.")
+
+        if chat_id:
+            connection = create_db_connection()
+            cursor = connection.cursor()
+            try:
+                cursor.execute(
+                    "SELECT sender, content FROM messages WHERE chat_id = ? ORDER BY timestamp ASC",
+                    (chat_id,)
+                )
+                prior_messages = cursor.fetchall()
+                for sender, content in prior_messages:
+                    role = 'user' if sender == 'user' else 'assistant'
+                    messages.append({"role": role, "content": content})
+                logger.debug(f"Added {len(prior_messages)} prior messages from chat_id {chat_id} to messages for token counting.")
+            except Error as e:
+                logger.exception("Database error while fetching messages for token counting.")
+                return jsonify({'error': 'Database error while fetching messages.'}), 500
+            finally:
+                cursor.close()
+                connection.close()
+
+        # Add the new user message
+        messages.append({"role": "user", "content": new_message})
+        logger.debug("Added new user message to messages for token counting.")
+
+        # Count tokens
+        token_count = count_tokens(messages, MODEL)
+        logger.debug(f"Total input tokens: {token_count}")
+        return jsonify({'input_token_count': token_count}), 200
+
+    except Exception as e:
+        logger.exception("Error in /count_tokens endpoint.")
+        return jsonify({'error': 'Failed to count tokens.'}), 500
+
 @app.route('/chat', methods=['POST'])
 def chat():
     """
     Endpoint to handle chat messages.
     Expects a JSON payload with the user's message and optional chat_id.
-    Streams the response from OpenAI to the client.
+    Streams the response from OpenAI to the client along with output token counts.
     """
     global codebase_content
     logger.info("Received chat request.")
@@ -180,11 +266,9 @@ def chat():
         data = request.get_json()
         user_message = data.get('message', '').strip()
         chat_id = data.get('chat_id')
-
         if not user_message:
             logger.warning("No message provided in the request.")
             return jsonify({'error': 'No message provided.'}), 400
-
         logger.debug(f"User message: {user_message}")
 
         connection = create_db_connection()
@@ -212,37 +296,28 @@ def chat():
         connection.commit()
         logger.debug(f"Inserted user message into chat_id {chat_id}.")
 
-        # Retrieve prior messages for the chat to include in the context
         cursor.execute(
             "SELECT sender, content FROM messages WHERE chat_id = ? ORDER BY timestamp ASC",
             (chat_id,)
         )
         prior_messages = cursor.fetchall()
-
         messages = []
-
-        # If there is codebase content, include it as a system message
         if codebase_content:
-            system_message = f"You have access to the following codebase:\n\n{codebase_content}"
-            messages.append({"role": "system", "content": system_message})
-
-        # Add prior messages to the messages list
+            assistant_message = f"You have access to the following codebase:\n\n{codebase_content}"
+            messages.append({"role": "assistant", "content": assistant_message})
         for sender, content in prior_messages:
             role = 'user' if sender == 'user' else 'assistant'
             messages.append({"role": role, "content": content})
 
-        # Prepare the payload for OpenAI API
         api_payload = {
             "model": MODEL,
             "messages": messages,
             "stream": True
         }
-
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {API_KEY}'
         }
-
         logger.debug("Sending request to OpenAI API.")
         openai_response = requests.post(
             'https://api.openai.com/v1/chat/completions',
@@ -250,16 +325,19 @@ def chat():
             json=api_payload,
             stream=True
         )
-
         if openai_response.status_code != 200:
             error_message = openai_response.json().get('error', {}).get('message', 'API request failed.')
             logger.error(f"OpenAI API request failed: {error_message}")
             return jsonify({'error': error_message}), openai_response.status_code
-
         logger.info("OpenAI API request successful. Streaming response to client.")
 
         def generate_and_store():
             bot_response = ""
+            output_token_count = 0
+            try:
+                encoding = tiktoken.encoding_for_model(MODEL)
+            except KeyError:
+                encoding = tiktoken.get_encoding('cl100k_base')
             try:
                 for chunk in openai_response.iter_lines():
                     if chunk:
@@ -270,8 +348,11 @@ def chat():
                             break
                         data = json.loads(chunk.decode('utf-8'))
                         delta = data['choices'][0]['delta'].get('content', '')
-                        bot_response += delta
                         yield delta
+                        if delta:
+                            bot_response += delta
+                            tokens = encoding.encode(delta)
+                            output_token_count += len(tokens)
                 if bot_response.strip():
                     try:
                         bot_conn = create_db_connection()
@@ -283,6 +364,7 @@ def chat():
                         )
                         bot_conn.commit()
                         logger.debug(f"Inserted bot message into chat_id {chat_id}.")
+                        yield f"\n[TOKEN_COUNT: {output_token_count}]\n"
                     except Error as e:
                         logger.exception("Failed to insert bot message into the database.")
                         yield f"\n[Error]: Failed to store bot message: {str(e)}"
@@ -293,6 +375,7 @@ def chat():
                             bot_conn.close()
                 else:
                     logger.warning("Bot response is empty. No insertion performed.")
+                    yield "\n[TOKEN_COUNT: 0]\n"
             except Exception as e:
                 logger.exception("Error while streaming and storing bot response.")
                 yield f"\n[Error]: {str(e)}"
@@ -372,6 +455,60 @@ def get_chat_history(chat_id):
             cursor.close()
         if connection:
             connection.close()
+
+@app.route('/count_tokens_full', methods=['POST'])
+def count_tokens_full_route():
+    """
+    Endpoint to count the full input tokens including assistant message, conversation history, and new message.
+    Expects a JSON payload with 'chat_id' (optional) and 'new_message'.
+    """
+    try:
+        data = request.get_json()
+        chat_id = data.get('chat_id')
+        new_message = data.get('new_message', '').strip()
+        if not new_message:
+            return jsonify({'error': 'No new_message provided.'}), 400
+
+        messages = []
+
+        # Add assistant message with codebase_content
+        if codebase_content:
+            assistant_message = f"You have access to the following codebase:\n\n{codebase_content}"
+            messages.append({"role": "assistant", "content": assistant_message})
+            logger.debug("Added assistant message with codebase content to messages for token counting.")
+
+        if chat_id:
+            connection = create_db_connection()
+            cursor = connection.cursor()
+            try:
+                cursor.execute(
+                    "SELECT sender, content FROM messages WHERE chat_id = ? ORDER BY timestamp ASC",
+                    (chat_id,)
+                )
+                prior_messages = cursor.fetchall()
+                for sender, content in prior_messages:
+                    role = 'user' if sender == 'user' else 'assistant'
+                    messages.append({"role": role, "content": content})
+                logger.debug(f"Added {len(prior_messages)} prior messages from chat_id {chat_id} to messages for token counting.")
+            except Error as e:
+                logger.exception("Database error while fetching messages for token counting.")
+                return jsonify({'error': 'Database error while fetching messages.'}), 500
+            finally:
+                cursor.close()
+                connection.close()
+
+        # Add the new user message
+        messages.append({"role": "user", "content": new_message})
+        logger.debug("Added new user message to messages for token counting.")
+
+        # Count tokens
+        token_count = count_tokens(messages, MODEL)
+        logger.debug(f"Total input tokens: {token_count}")
+        return jsonify({'input_token_count': token_count}), 200
+
+    except Exception as e:
+        logger.exception("Error in /count_tokens_full endpoint.")
+        return jsonify({'error': 'Failed to count tokens.'}), 500
 
 if __name__ == '__main__':
     logger.info("Running Flask app on port 5000.")
