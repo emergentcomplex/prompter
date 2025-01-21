@@ -5,8 +5,8 @@ import logging
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import requests
-import mysql.connector
-from mysql.connector import Error
+import mariadb
+from mariadb import Error
 from datetime import datetime
 import re
 
@@ -25,10 +25,13 @@ file_handler.setLevel(logging.DEBUG)
 formatter = logging.Formatter(
     '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
 console_handler.setFormatter(formatter)
 file_handler.setFormatter(formatter)
+
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
+
 logger.info("Starting PrompterApp...")
 
 config = {}
@@ -62,66 +65,49 @@ codebase_content = ""
 
 def create_db_connection():
     try:
-        connection = mysql.connector.connect(
-            host=DB_HOST,
+        connection = mariadb.connect(
             user=DB_USER,
             password=DB_PASSWORD,
+            host=DB_HOST,
             database=DB_NAME
         )
-        if connection.is_connected():
-            logger.info("Connected to MySQL database")
-            return connection
+        logger.info("Connected to MariaDB database")
+        return connection
     except Error as e:
-        logger.exception("Error while connecting to MySQL")
+        logger.exception("Error while connecting to MariaDB")
         raise e
 
 def init_db():
     connection = create_db_connection()
     cursor = connection.cursor()
-    create_chat_history_table = """
-    CREATE TABLE IF NOT EXISTS chat_history (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        title VARCHAR(255),
-        created_at DATETIME
-    )
-    """
-    cursor.execute(create_chat_history_table)
-    create_messages_table = """
-    CREATE TABLE IF NOT EXISTS messages (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        chat_id INT,
-        sender ENUM('user', 'bot'),
-        content TEXT,
-        timestamp DATETIME,
-        FOREIGN KEY (chat_id) REFERENCES chat_history(id) ON DELETE CASCADE
-    )
-    """
-    cursor.execute(create_messages_table)
-    # Create scratch_pad table
-    create_scratch_pad_table = """
-    CREATE TABLE IF NOT EXISTS scratch_pad (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        label VARCHAR(255),
-        content TEXT
-    )
-    """
-    cursor.execute(create_scratch_pad_table)
-
-    # Initialize scratch_pad entries if they don't exist
-    cursor.execute("SELECT COUNT(*) FROM scratch_pad")
-    count = cursor.fetchone()[0]
-    if count == 0:
-        labels = ['Prompt 1', 'Prompt 2', 'Prompt 3', 'Prompt 4']
-        for label in labels:
-            cursor.execute(
-                "INSERT INTO scratch_pad (label, content) VALUES (%s, %s)",
-                (label, '')
-            )
-
-    connection.commit()
-    cursor.close()
-    connection.close()
-    logger.info("Database initialized and tables ensured.")
+    try:
+        create_chat_history_table = """
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            title VARCHAR(255),
+            created_at DATETIME
+        )
+        """
+        cursor.execute(create_chat_history_table)
+        create_messages_table = """
+        CREATE TABLE IF NOT EXISTS messages (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            chat_id INT,
+            sender ENUM('user', 'bot'),
+            content TEXT,
+            timestamp DATETIME,
+            FOREIGN KEY (chat_id) REFERENCES chat_history(id) ON DELETE CASCADE
+        )
+        """
+        cursor.execute(create_messages_table)
+        connection.commit()
+        logger.info("Database initialized and tables ensured.")
+    except Error as e:
+        logger.exception("Error initializing the database.")
+        raise e
+    finally:
+        cursor.close()
+        connection.close()
 
 init_db()
 
@@ -151,6 +137,25 @@ def run_codecollector():
         logger.exception("An unexpected error occurred.")
         return jsonify({'error': str(ex)}), 500
 
+def generate_stream(openai_response):
+    """
+    Generator function to yield chunks of data from OpenAI's streaming response.
+    """
+    try:
+        for chunk in openai_response.iter_lines():
+            if chunk:
+                if chunk.startswith(b'data: '):
+                    chunk = chunk[len(b'data: '):]
+                if chunk == b'[DONE]':
+                    logger.debug("Received [DONE] from OpenAI stream.")
+                    break
+                data = json.loads(chunk.decode('utf-8'))
+                delta = data['choices'][0]['delta'].get('content', '')
+                yield delta
+    except Exception as e:
+        logger.exception("Error while generating stream.")
+        yield f"\n[Error]: {str(e)}"
+
 def extract_keywords(text):
     """
     Extracts prominent keywords from the user message for generating chat titles.
@@ -160,66 +165,17 @@ def extract_keywords(text):
     keywords = [word for word in words if word not in common_words]
     return ' '.join(keywords[:5])
 
-@app.route('/update_scratch_pad', methods=['POST'])
-def update_scratch_pad():
-    """
-    Endpoint to update the scratch_pad table with textarea contents.
-    Expects a JSON payload with 'label' and 'content'.
-    """
-    try:
-        data = request.get_json()
-        label = data.get('label')
-        content = data.get('content', '').strip()
-        if not label:
-            logger.warning("No label provided in the request.")
-            return jsonify({'error': 'No label provided.'}), 400
-        connection = create_db_connection()
-        cursor = connection.cursor()
-        cursor.execute(
-            "UPDATE scratch_pad SET content = %s WHERE label = %s",
-            (content, label)
-        )
-        connection.commit()
-        logger.info(f"Updated scratch_pad for label '{label}'.")
-        return jsonify({'message': 'Scratch pad updated successfully.'}), 200
-    except Exception as e:
-        logger.exception("Error updating scratch_pad.")
-        return jsonify({'error': str(e)}), 500
-    finally:
-        if 'cursor' in locals() and cursor:
-            cursor.close()
-        if 'connection' in locals() and connection.is_connected():
-            connection.close()
-
-@app.route('/get_scratch_pad', methods=['GET'])
-def get_scratch_pad():
-    """
-    Endpoint to retrieve the contents of the scratch_pad table.
-    """
-    try:
-        connection = create_db_connection()
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT label, content FROM scratch_pad")
-        scratch_pad = cursor.fetchall()
-        return jsonify({'scratch_pad': scratch_pad}), 200
-    except Exception as e:
-        logger.exception("Error fetching scratch_pad.")
-        return jsonify({'error': str(e)}), 500
-    finally:
-        if 'cursor' in locals() and cursor:
-            cursor.close()
-        if 'connection' in locals() and connection.is_connected():
-            connection.close()
-
 @app.route('/chat', methods=['POST'])
 def chat():
     """
     Endpoint to handle chat messages.
-    Expects a JSON payload with the user's message.
+    Expects a JSON payload with the user's message and optional chat_id.
     Streams the response from OpenAI to the client.
     """
     global codebase_content
     logger.info("Received chat request.")
+    connection = None
+    cursor = None
     try:
         data = request.get_json()
         user_message = data.get('message', '').strip()
@@ -228,71 +184,65 @@ def chat():
         if not user_message:
             logger.warning("No message provided in the request.")
             return jsonify({'error': 'No message provided.'}), 400
+
         logger.debug(f"User message: {user_message}")
 
         connection = create_db_connection()
         cursor = connection.cursor()
 
-        # Update 'Prompt 4' in scratch_pad with user's current text area content
-        cursor.execute(
-            "UPDATE scratch_pad SET content = %s WHERE label = %s",
-            (user_message, 'Prompt 4')
-        )
-        connection.commit()
-        logger.debug("Updated 'Prompt 4' in scratch_pad.")
-
-        # Retrieve scratch_pad contents in order
-        cursor.execute(
-            "SELECT content FROM scratch_pad ORDER BY id"
-        )
-        prompts = cursor.fetchall()
-        prompt_texts = [prompt[0] for prompt in prompts]
-
         if chat_id:
             logger.debug(f"Continuing existing chat with ID: {chat_id}")
-            cursor.execute("SELECT id FROM chat_history WHERE id = %s", (chat_id,))
+            cursor.execute("SELECT id FROM chat_history WHERE id = ?", (chat_id,))
             if cursor.fetchone() is None:
                 logger.warning(f"Chat ID {chat_id} not found.")
                 return jsonify({'error': 'Chat history not found.'}), 404
         else:
             title = extract_keywords(user_message) or "Untitled Chat"
             created_at = datetime.utcnow()
-            cursor.execute("INSERT INTO chat_history (title, created_at) VALUES (%s, %s)", (title, created_at))
+            cursor.execute("INSERT INTO chat_history (title, created_at) VALUES (?, ?)", (title, created_at))
             connection.commit()
             chat_id = cursor.lastrowid
             logger.info(f"Created new chat history with ID: {chat_id} and title: '{title}'")
 
         timestamp = datetime.utcnow()
         cursor.execute(
-            "INSERT INTO messages (chat_id, sender, content, timestamp) VALUES (%s, %s, %s, %s)",
+            "INSERT INTO messages (chat_id, sender, content, timestamp) VALUES (?, ?, ?, ?)",
             (chat_id, 'user', user_message, timestamp)
         )
         connection.commit()
         logger.debug(f"Inserted user message into chat_id {chat_id}.")
 
-        # Combine prompts with labels
-        combined_prompts = ""
-        section_labels = ["[1] Global Instructions", "[2] Project State", "[3] Context", "[4] Task to Perform"]
-        for i, prompt_text in enumerate(prompt_texts):
-            combined_prompts += f"{section_labels[i]}\n{prompt_text}\n\n"
+        # Retrieve prior messages for the chat to include in the context
+        cursor.execute(
+            "SELECT sender, content FROM messages WHERE chat_id = ? ORDER BY timestamp ASC",
+            (chat_id,)
+        )
+        prior_messages = cursor.fetchall()
 
+        messages = []
+
+        # If there is codebase content, include it as a system message
         if codebase_content:
-            combined_prompts = f"You have access to the following codebase:\n\n{codebase_content}\n\n" + combined_prompts
-            logger.debug("Combined prompts with codebase content.")
-        else:
-            logger.debug("Combined prompts without codebase content.")
+            system_message = f"You have access to the following codebase:\n\n{codebase_content}"
+            messages.append({"role": "system", "content": system_message})
 
+        # Add prior messages to the messages list
+        for sender, content in prior_messages:
+            role = 'user' if sender == 'user' else 'assistant'
+            messages.append({"role": role, "content": content})
+
+        # Prepare the payload for OpenAI API
         api_payload = {
             "model": MODEL,
-            "messages": [
-                {"role": "user", "content": combined_prompts}
-            ],
+            "messages": messages,
             "stream": True
         }
+
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {API_KEY}'
         }
+
         logger.debug("Sending request to OpenAI API.")
         openai_response = requests.post(
             'https://api.openai.com/v1/chat/completions',
@@ -300,10 +250,12 @@ def chat():
             json=api_payload,
             stream=True
         )
+
         if openai_response.status_code != 200:
             error_message = openai_response.json().get('error', {}).get('message', 'API request failed.')
             logger.error(f"OpenAI API request failed: {error_message}")
             return jsonify({'error': error_message}), openai_response.status_code
+
         logger.info("OpenAI API request successful. Streaming response to client.")
 
         def generate_and_store():
@@ -326,18 +278,18 @@ def chat():
                         bot_cursor = bot_conn.cursor()
                         bot_timestamp = datetime.utcnow()
                         bot_cursor.execute(
-                            "INSERT INTO messages (chat_id, sender, content, timestamp) VALUES (%s, %s, %s, %s)",
+                            "INSERT INTO messages (chat_id, sender, content, timestamp) VALUES (?, ?, ?, ?)",
                             (chat_id, 'bot', bot_response, bot_timestamp)
                         )
                         bot_conn.commit()
                         logger.debug(f"Inserted bot message into chat_id {chat_id}.")
-                    except Exception as e:
+                    except Error as e:
                         logger.exception("Failed to insert bot message into the database.")
                         yield f"\n[Error]: Failed to store bot message: {str(e)}"
                     finally:
                         if 'bot_cursor' in locals() and bot_cursor:
                             bot_cursor.close()
-                        if 'bot_conn' in locals() and bot_conn.is_connected():
+                        if 'bot_conn' in locals() and bot_conn:
                             bot_conn.close()
                 else:
                     logger.warning("Bot response is empty. No insertion performed.")
@@ -346,13 +298,17 @@ def chat():
                 yield f"\n[Error]: {str(e)}"
 
         return Response(generate_and_store(), mimetype='text/plain')
+
+    except Error as e:
+        logger.exception("Database error during chat processing.")
+        return jsonify({'error': str(e)}), 500
     except Exception as e:
         logger.exception("An unexpected error occurred during chat processing.")
         return jsonify({'error': str(e)}), 500
     finally:
-        if 'cursor' in locals() and cursor:
+        if cursor:
             cursor.close()
-        if 'connection' in locals() and connection.is_connected():
+        if connection:
             connection.close()
 
 @app.route('/history', methods=['GET'])
@@ -360,19 +316,24 @@ def get_history():
     """
     Endpoint to retrieve a list of chat histories.
     """
+    connection = None
+    cursor = None
     try:
         connection = create_db_connection()
         cursor = connection.cursor(dictionary=True)
         cursor.execute("SELECT id, title, created_at FROM chat_history ORDER BY created_at DESC")
         histories = cursor.fetchall()
         return jsonify({'histories': histories}), 200
-    except Exception as e:
+    except Error as e:
         logger.exception("Error fetching chat histories.")
         return jsonify({'error': str(e)}), 500
+    except Exception as e:
+        logger.exception("An unexpected error occurred while fetching chat histories.")
+        return jsonify({'error': str(e)}), 500
     finally:
-        if 'cursor' in locals() and cursor:
+        if cursor:
             cursor.close()
-        if 'connection' in locals() and connection.is_connected():
+        if connection:
             connection.close()
 
 @app.route('/history/<int:chat_id>', methods=['GET'])
@@ -380,16 +341,18 @@ def get_chat_history(chat_id):
     """
     Endpoint to retrieve messages for a specific chat history.
     """
+    connection = None
+    cursor = None
     try:
         connection = create_db_connection()
         cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT id, title, created_at FROM chat_history WHERE id = %s", (chat_id,))
+        cursor.execute("SELECT id, title, created_at FROM chat_history WHERE id = ?", (chat_id,))
         chat = cursor.fetchone()
         if not chat:
             logger.warning(f"Chat history with id {chat_id} not found.")
             return jsonify({'error': 'Chat history not found.'}), 404
         cursor.execute(
-            "SELECT sender, content, timestamp FROM messages WHERE chat_id = %s ORDER BY timestamp ASC",
+            "SELECT sender, content, timestamp FROM messages WHERE chat_id = ? ORDER BY timestamp ASC",
             (chat_id,)
         )
         messages = cursor.fetchall()
@@ -398,13 +361,16 @@ def get_chat_history(chat_id):
             'chat': chat,
             'messages': messages
         }), 200
-    except Exception as e:
+    except Error as e:
         logger.exception("Error fetching specific chat history.")
         return jsonify({'error': str(e)}), 500
+    except Exception as e:
+        logger.exception("An unexpected error occurred while fetching specific chat history.")
+        return jsonify({'error': str(e)}), 500
     finally:
-        if 'cursor' in locals() and cursor:
+        if cursor:
             cursor.close()
-        if 'connection' in locals() and connection.is_connected():
+        if connection:
             connection.close()
 
 if __name__ == '__main__':
